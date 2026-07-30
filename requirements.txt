@@ -1,0 +1,12 @@
+# Core pipeline dependencies.
+# The TabFM foundation model is optional and installed separately, because its
+# pretrained weights are downloaded from Hugging Face and carry a non-commercial
+# licence (see README, "Licensing"). Install it with:
+#
+#   pip install "tabfm[pytorch]"
+#
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.4
+scipy>=1.11
+requests>=2.31
