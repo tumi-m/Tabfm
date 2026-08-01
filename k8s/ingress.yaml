@@ -1,0 +1,32 @@
+# Exposes the UI and API on one host. Adjust the host, ingressClassName and TLS
+# secret for your cluster; the annotations shown are ingress-nginx's.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tabfm-lab
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    # Batch predictions are bounded at 1,000 rows, so requests stay short.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tabfm.example.com
+      secretName: tabfm-lab-tls
+  rules:
+    - host: tabfm.example.com
+      http:
+        paths:
+          # The API serves the static UI itself, so a single backend covers
+          # both "/" and "/api/..." — no separate frontend service.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tabfm-lab-api
+                port:
+                  name: http

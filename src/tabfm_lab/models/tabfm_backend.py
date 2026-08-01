@@ -18,6 +18,7 @@ Two practical consequences shape this wrapper:
 
 from __future__ import annotations
 
+import importlib
 import inspect
 import logging
 from typing import Any
@@ -31,6 +32,10 @@ from .preprocess import as_sklearn_frame, ordinal_transformer, to_dense_float
 LOGGER = logging.getLogger(__name__)
 
 BACKENDS = ("pytorch", "jax")
+
+#: Attribute on a fitted TabFM estimator holding the frozen foundation model.
+#: Excluded from pickles and restored on load — see TabFMModel.__getstate__.
+_WEIGHTS_ATTRIBUTE = "model"
 
 
 class TabFMUnavailableError(RuntimeError):
@@ -190,12 +195,68 @@ class TabFMModel:
         return to_dense_float(self._transformer.transform(as_sklearn_frame(X, self._categorical)))
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
+        self._ensure_estimator()
         return np.asarray(self._estimator.predict(self._matrix(X)))
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         if self.task_type != "classification":
             raise AttributeError("predict_proba is only defined for classification")
+        self._ensure_estimator()
         return np.asarray(self._estimator.predict_proba(self._matrix(X)))
+
+    # -- pickling ---------------------------------------------------------
+    # A fitted TabFM estimator holds two very different things: the in-context
+    # training rows (small, and genuinely part of the fitted state) and a
+    # reference to the frozen foundation model (hundreds of megabytes, identical
+    # for every task). Pickling naively would copy the weights into every
+    # artifact. Instead the weights are dropped on the way out and reloaded on
+    # first use, which TabFM's own process-wide load cache makes nearly free
+    # when several artifacts are served from one process.
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        estimator = state.get("_estimator")
+        if estimator is not None:
+            inner = estimator.__dict__.copy()
+            inner.pop(_WEIGHTS_ATTRIBUTE, None)
+            state["_estimator_blueprint"] = {
+                "module": type(estimator).__module__,
+                "qualname": type(estimator).__qualname__,
+                "state": inner,
+            }
+        state["_estimator"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        # Rebuilt on first prediction so unpickling stays cheap and cannot fail
+        # on a machine that is only inspecting artifact metadata.
+        self._estimator = None
+
+    def _ensure_estimator(self) -> None:
+        """Rebuild the fitted estimator from a blueprint after unpickling."""
+        if self._estimator is not None:
+            return
+
+        blueprint = self.__dict__.pop("_estimator_blueprint", None)
+        if blueprint is None:
+            raise RuntimeError("fit() must be called before predicting")
+
+        module = importlib.import_module(blueprint["module"])
+        estimator_class = getattr(module, blueprint["qualname"])
+
+        model_type = "regression" if self.task_type == "regression" else "classification"
+        weights = _load_backend(
+            self.backend,
+            model_type,
+            checkpoint_path=self.checkpoint_path,
+            device=self.device,
+        )
+
+        estimator = estimator_class.__new__(estimator_class)
+        estimator.__dict__.update(blueprint["state"])
+        setattr(estimator, _WEIGHTS_ATTRIBUTE, weights)
+        self._estimator = estimator
 
 
 def build_tabfm(task: TabularTask, **kwargs) -> TabFMModel:

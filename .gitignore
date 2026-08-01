@@ -19,6 +19,10 @@ data/interim/
 reports/*
 !reports/.gitkeep
 
+# Pickled model artifacts are build outputs, produced by `tabfm-lab-train`.
+# They are also executable on load, so they do not belong in source control.
+artifacts/
+
 # Model caches
 .cache/
 *.ckpt

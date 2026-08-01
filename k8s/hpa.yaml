@@ -1,0 +1,45 @@
+# Prediction is CPU-bound, so CPU utilisation is the scaling signal. Memory is
+# included as a guard: each replica holds every model in RAM, so memory pressure
+# means the models grew, not that traffic did.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tabfm-lab-api
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tabfm-lab-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      # React quickly to a burst, but not to a single noisy scrape.
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      # Cold start costs an unpickle of every model, so shed capacity slowly.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

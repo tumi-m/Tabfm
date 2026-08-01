@@ -11,6 +11,11 @@ whether it beats a gradient-boosted tree that has actually been fitted to the pr
 and whether its probabilities are calibrated well enough to act on. This repository is
 built to answer both, honestly, on public data.
 
+The models are then packaged for use: fitted models are persisted as pickled artifacts,
+served over a FastAPI service with a static web UI, containerised, and deployed with
+Kubernetes manifests. Jump to [Serving](#serving-the-models), [Docker](#docker) or
+[Kubernetes](#kubernetes) for that half.
+
 ## The four tasks
 
 | Task | Industry | Type | Target | Why it matters |
@@ -155,6 +160,121 @@ stdout. `tabfm-lab --help` lists every option; `--list-tasks` names the tasks.
 pytest          # unit tests, no network required
 ```
 
+## Serving the models
+
+Training and serving are separate. `tabfm-lab-train` fits the models and writes
+one pickle per task; the API only ever unpickles, so the request path does no
+downloading and no fitting, and a readiness probe that passes means the process
+can actually answer.
+
+```bash
+tabfm-lab-train                      # writes artifacts/*.pkl
+make serve                           # http://localhost:8000
+```
+
+The UI is at `/`, the OpenAPI docs at `/docs`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health` | Liveness. Never touches the models. |
+| `GET /api/ready` | Readiness. 503 until at least one artifact loads. |
+| `GET /api/models` | Loaded models with their test-split metrics. |
+| `GET /api/models/{task}` | Input schema: fields, types, choices, defaults. |
+| `POST /api/models/{task}/predict` | Batch prediction, up to 1,000 records. |
+| `POST /api/fixtures/predict` | Score a football fixture from two team names. |
+
+Records may be partial — omitted fields fall back to the training median or
+modal value, so a caller only has to send what it actually knows:
+
+```bash
+curl -s localhost:8000/api/models/ecommerce-conversion/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"records":[{"PageValues":42,"ProductRelated":48,"ExitRates":0.01}]}'
+```
+
+The fixture endpoint is the interesting one. Rather than making a caller supply
+35 engineered features — which they could not compute, and could trivially get
+wrong — the server rebuilds them from the `MatchFeaturizer` stored inside the
+artifact. That is the same object, running the same code, that produced the
+training set, so serving features cannot drift from training features.
+
+```bash
+curl -s localhost:8000/api/fixtures/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"home_team":"Arsenal","away_team":"Chelsea",
+       "odds":{"home":2.10,"draw":3.40,"away":3.60}}'
+```
+
+Supplying odds adds the value analysis: model probability against the
+de-margined market price, the edge on each outcome, and a flag above +5%.
+
+### About the pickles
+
+A fitted TabFM estimator holds two very different things — the in-context
+training rows, which are small and genuinely part of the fitted state, and a
+reference to the frozen foundation model, which is hundreds of megabytes and
+identical for every task. Pickling it naively copies the weights into every
+artifact.
+
+So `TabFMModel.__getstate__` drops the weights and `_ensure_estimator` reloads
+them on first use, which is nearly free because TabFM's own `load()` keeps a
+process-wide cache keyed by `(model_type, checkpoint_path, device, dtype)`. Four
+artifacts in one server share one copy of the model. The baseline artifacts in
+this repo come out at 180–420 KB each.
+
+> **Unpickling executes code in the file.** The registry loads only from the
+> directory an operator configures, never from request data. Treat artifacts as
+> deployable code — build them in your own pipeline, don't accept them from
+> users. Artifacts are gitignored for the same reason.
+
+## Docker
+
+```bash
+make docker-build
+make docker-up          # trains into a volume, then serves on :8000
+```
+
+TabFM is **off by default** in the image. Serving only needs
+numpy/pandas/scikit-learn unless an artifact actually contains a TabFM model,
+and adding torch multiplies the image size by roughly ten. Turn it on when you
+need it:
+
+```bash
+docker build -f docker/Dockerfile --build-arg INSTALL_TABFM=true -t tabfm-lab-api .
+```
+
+The image runs as a non-root user with a read-only root filesystem, carries a
+`HEALTHCHECK`, and takes artifacts at runtime rather than baking them in — so
+shipping a retrained model does not mean rebuilding the image.
+
+## Kubernetes
+
+```bash
+kubectl apply -k k8s/
+```
+
+That creates a namespace, config, two PVCs, a training Job, a 2-replica
+Deployment with a PodDisruptionBudget, a Service, an Ingress and an HPA.
+
+A few choices worth knowing about:
+
+- **Liveness and readiness point at different endpoints on purpose.** Liveness
+  hits `/api/health`, which never touches the models, so a bad artifact drains
+  traffic instead of triggering a restart loop. Readiness hits `/api/ready`,
+  which returns 503 until an artifact loads, so a pod with an empty volume stays
+  out of the Service rather than serving 404s.
+- **A startup probe covers the unpickling window**, giving up to two minutes of
+  cold start before liveness begins.
+- **Scale with replicas, not workers.** Every worker unpickles its own copy of
+  every model, so `WEB_CONCURRENCY` multiplies memory. The HPA scales up quickly
+  and down slowly, since a cold start pays for the unpickle again.
+- **The artifact PVC is ReadWriteMany**, because several replicas mount it at
+  once. If your cluster has no RWX StorageClass, `k8s/pvc.yaml` documents the two
+  alternatives.
+
+On a first install the Deployment stays unready until the training Job finishes
+writing artifacts. That is the readiness probe working, not a failure.
+
 ## Baseline results
 
 From `tabfm-lab --no-tabfm` on Premier League 2015/16–2023/24 (train 2015/16–2021/22,
@@ -219,9 +339,18 @@ src/tabfm_lab/
 ├── evaluation/
 │   ├── metrics.py     # accuracy, log loss, Brier, calibration, RMSE/MAE/R²
 │   └── betting.py     # overround removal, value bets, Kelly, Poisson lines
+├── serving/
+│   ├── artifacts.py   # pickle format, field specs, registry
+│   ├── train.py       # tabfm-lab-train entry point
+│   ├── schemas.py     # request/response models
+│   └── app.py         # FastAPI service
 ├── pipeline.py        # orchestration
 ├── reporting.py       # Markdown rendering
 └── cli.py             # tabfm-lab entry point
+
+frontend/              # static UI (no build step) served by the API
+docker/                # Dockerfile + compose stack
+k8s/                   # namespace, PVCs, training Job, Deployment, HPA, Ingress
 ```
 
 ## Licensing

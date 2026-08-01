@@ -1,0 +1,28 @@
+# Apply the whole stack:
+#   kubectl apply -k k8s/
+#
+# Order matters on a first install: the Deployment stays unready until the
+# training Job has written artifacts into the shared volume, which is the
+# readiness probe doing its job rather than a failure.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tabfm-lab
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - job-train.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/name: tabfm-lab
+  app.kubernetes.io/part-of: tabfm-lab
+
+images:
+  - name: ghcr.io/tumi-m/tabfm-lab-api
+    newTag: 0.1.0

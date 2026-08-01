@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TabFM Lab — model console</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>" />
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead__inner">
+      <div>
+        <h1>TabFM Lab</h1>
+        <p class="masthead__sub">Zero-shot tabular models for e-commerce and sports betting</p>
+      </div>
+      <div class="masthead__meta">
+        <span id="status-pill" class="pill pill--muted">connecting…</span>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle colour theme">◐</button>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-panel="ecommerce">E-commerce</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="sports">Sports betting</button>
+      <button class="tab" role="tab" aria-selected="false" data-panel="models">Models</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ---------------------------------------------------------------- -->
+    <section id="panel-ecommerce" class="panel" role="tabpanel">
+      <div class="grid">
+        <form id="ecommerce-form" class="card">
+          <h2>Session</h2>
+          <p class="card__hint">
+            Describe a browsing session. Fields left alone use the median or most
+            common value from training.
+          </p>
+          <div id="ecommerce-fields" class="fields"></div>
+          <div class="actions">
+            <button type="submit" class="button button--primary">Score session</button>
+            <button type="button" class="button" data-action="reset-ecommerce">Reset</button>
+          </div>
+        </form>
+
+        <div class="card" id="ecommerce-results" hidden>
+          <h2>Prediction</h2>
+
+          <figure class="hero">
+            <figcaption class="hero__label">Probability this session ends in a purchase</figcaption>
+            <div class="hero__value" id="conversion-value">—</div>
+            <div class="meter" role="img" aria-labelledby="conversion-value">
+              <div class="meter__fill" id="conversion-bar" style="width:0%"></div>
+            </div>
+            <p class="hero__foot" id="conversion-context"></p>
+          </figure>
+
+          <div class="tiles">
+            <div class="tile">
+              <span class="tile__label">Predicted page value</span>
+              <span class="tile__value" id="page-value">—</span>
+              <span class="tile__unit">revenue proxy per session</span>
+            </div>
+            <div class="tile">
+              <span class="tile__label">Latency</span>
+              <span class="tile__value" id="ecommerce-latency">—</span>
+              <span class="tile__unit">server-side</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section id="panel-sports" class="panel" role="tabpanel" hidden>
+      <div class="grid">
+        <form id="fixture-form" class="card">
+          <h2>Fixture</h2>
+          <p class="card__hint">
+            Pick two teams. The server rebuilds pre-match features — Elo, form,
+            rest days — from match history, using the same code that built the
+            training set.
+          </p>
+
+          <div class="fields">
+            <label class="field">
+              <span class="field__label">Home team</span>
+              <select id="home-team" required></select>
+            </label>
+            <label class="field">
+              <span class="field__label">Away team</span>
+              <select id="away-team" required></select>
+            </label>
+            <label class="field">
+              <span class="field__label">Date <span class="field__opt">optional</span></span>
+              <input type="date" id="fixture-date" />
+            </label>
+          </div>
+
+          <fieldset class="odds">
+            <legend>Bookmaker odds <span class="field__opt">optional — enables value analysis</span></legend>
+            <div class="fields fields--three">
+              <label class="field">
+                <span class="field__label">Home</span>
+                <input type="number" id="odds-home" step="0.01" min="1.01" placeholder="2.10" />
+              </label>
+              <label class="field">
+                <span class="field__label">Draw</span>
+                <input type="number" id="odds-draw" step="0.01" min="1.01" placeholder="3.40" />
+              </label>
+              <label class="field">
+                <span class="field__label">Away</span>
+                <input type="number" id="odds-away" step="0.01" min="1.01" placeholder="3.60" />
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="actions">
+            <button type="submit" class="button button--primary">Predict fixture</button>
+          </div>
+        </form>
+
+        <div class="card" id="fixture-results" hidden>
+          <h2>Prediction</h2>
+          <p class="fixture-title" id="fixture-title"></p>
+
+          <div id="reliability-warning" class="callout callout--warning" hidden>
+            <span aria-hidden="true">▲</span>
+            <span id="reliability-text"></span>
+          </div>
+
+          <figure class="series">
+            <figcaption>Match result probability</figcaption>
+            <div id="result-bars" class="bars"></div>
+          </figure>
+
+          <div class="tiles">
+            <div class="tile">
+              <span class="tile__label">Expected total goals</span>
+              <span class="tile__value" id="expected-goals">—</span>
+              <span class="tile__unit">both teams combined</span>
+            </div>
+            <div class="tile">
+              <span class="tile__label">Over 2.5 goals</span>
+              <span class="tile__value" id="over-25">—</span>
+              <span class="tile__unit">Poisson from expected goals</span>
+            </div>
+          </div>
+
+          <div id="value-section" hidden>
+            <h3>Value analysis</h3>
+            <p class="card__hint">
+              Edge is expected profit per unit staked: model probability × decimal
+              odds − 1. A bet is flagged only above +5%.
+            </p>
+            <div class="table-wrap">
+              <table class="table">
+                <caption class="visually-hidden">Model probability against bookmaker prices</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Outcome</th>
+                    <th scope="col" class="num">Model</th>
+                    <th scope="col" class="num">Market</th>
+                    <th scope="col" class="num">Odds</th>
+                    <th scope="col" class="num">Edge</th>
+                    <th scope="col">Verdict</th>
+                  </tr>
+                </thead>
+                <tbody id="value-rows"></tbody>
+              </table>
+            </div>
+            <p class="card__hint" id="overround-note"></p>
+            <p class="disclaimer">
+              Measurement of a model against a market, not betting advice. Closing
+              prices are close to efficient and carry a margin; a negative edge is
+              the normal result.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section id="panel-models" class="panel" role="tabpanel" hidden>
+      <div class="card">
+        <h2>Loaded models</h2>
+        <p class="card__hint">
+          Each row is one pickled artifact loaded from disk at startup. Metrics are
+          from the held-out test split at training time.
+        </p>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Task</th>
+                <th scope="col">Industry</th>
+                <th scope="col">Type</th>
+                <th scope="col">Model</th>
+                <th scope="col" class="num">Train</th>
+                <th scope="col" class="num">Test</th>
+                <th scope="col">Key metrics</th>
+              </tr>
+            </thead>
+            <tbody id="model-rows"></tbody>
+          </table>
+        </div>
+        <p class="card__hint">
+          Full interactive API reference at <a href="/docs">/docs</a>.
+        </p>
+      </div>
+    </section>
+
+    <div id="error-toast" class="toast" role="alert" hidden></div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

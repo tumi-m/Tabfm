@@ -1,0 +1,19 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Datasets and reports are regenerated; artifacts are mounted or built by the
+# training job rather than baked into the serving image.
+data/
+reports/
+artifacts/
+
+.DS_Store
+*.md
+!README.md
+k8s/

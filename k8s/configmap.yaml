@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tabfm-lab-config
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+data:
+  # Where the serving process looks for pickled artifacts. Matches the volume
+  # mount in deployment.yaml and the output path of the training Job.
+  TABFM_ARTIFACT_DIR: "/var/lib/tabfm/artifacts"
+  TABFM_FRONTEND_DIR: "/app/frontend"
+
+  # Each worker unpickles its own copy of every model, so memory scales with
+  # this number. Prefer more replicas over more workers per pod.
+  WEB_CONCURRENCY: "1"
+
+  # The UI is served from the same origin as the API, so no cross-origin access
+  # is needed by default. Set to a comma-separated allowlist if you host the
+  # frontend elsewhere; "*" would let any site call this API from a browser.
+  TABFM_CORS_ORIGINS: ""

@@ -1,0 +1,56 @@
+# Local stack: train once into a shared volume, then serve.
+#
+#   docker compose -f docker/docker-compose.yml run --rm trainer
+#   docker compose -f docker/docker-compose.yml up api
+#
+# The UI is then at http://localhost:8000 and the API docs at /docs.
+
+name: tabfm-lab
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        INSTALL_TABFM: "${INSTALL_TABFM:-false}"
+    image: tabfm-lab-api:local
+    ports:
+      - "8000:8000"
+    environment:
+      TABFM_ARTIFACT_DIR: /var/lib/tabfm/artifacts
+      WEB_CONCURRENCY: "1"
+    volumes:
+      - artifacts:/var/lib/tabfm/artifacts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # One-shot job. Downloads the public datasets, fits the models and writes the
+  # pickles into the volume the API mounts read-only.
+  trainer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        INSTALL_TABFM: "${INSTALL_TABFM:-false}"
+    image: tabfm-lab-api:local
+    environment:
+      TABFM_ARTIFACT_DIR: /var/lib/tabfm/artifacts
+    volumes:
+      - artifacts:/var/lib/tabfm/artifacts
+      - datasets:/var/lib/tabfm/data
+    command: >
+      tabfm-lab-train
+      --output /var/lib/tabfm/artifacts
+      --data-dir /var/lib/tabfm/data
+      --model ${TRAIN_MODEL:-auto}
+    restart: "no"
+
+volumes:
+  artifacts:
+  datasets:

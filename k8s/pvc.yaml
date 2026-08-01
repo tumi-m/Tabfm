@@ -1,0 +1,39 @@
+# Shared artifact store: written once by the training Job, mounted read-only by
+# every API replica.
+#
+# ReadWriteMany is required because several API pods mount it at the same time.
+# If your cluster has no RWX StorageClass (many cloud block-storage classes are
+# RWO only), the alternatives are:
+#   * bake artifacts into the image and drop this volume entirely, or
+#   * give each pod an initContainer that runs `tabfm-lab-train` into an
+#     emptyDir — simpler, at the cost of retraining per pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tabfm-lab-artifacts
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  # storageClassName: <your-rwx-class>   # e.g. efs-sc, azurefile, nfs-client
+---
+# Dataset cache, so a re-run of the training Job does not re-download the
+# public CSVs. Only the Job mounts this, so RWO is sufficient.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tabfm-lab-datasets
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

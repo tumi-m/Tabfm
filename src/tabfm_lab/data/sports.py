@@ -24,7 +24,7 @@ betting evaluation as the benchmark to beat.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -181,24 +181,51 @@ def _side_stats(match, side: str) -> dict[str, float]:
     return out
 
 
-def build_match_features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Attach pre-match features to every row of a chronologically sorted frame.
+class MatchFeaturizer:
+    """Rolling pre-match state for a league, shared by training and serving.
 
-    For each match the features are computed from state that only contains
-    earlier matches; the state is updated with this match afterwards. Rows whose
-    teams do not yet have ``_MIN_HISTORY`` completed matches are dropped rather
-    than imputed, so the model is never trained on fabricated form.
+    Training walks the historical frame in order, featurising each match from
+    state built only from *earlier* matches and then observing it. Serving reuses
+    the very same object afterwards to featurise a fixture that has not been
+    played yet. That reuse is the point: the training and inference feature
+    definitions cannot drift apart, because there is only one definition.
+
+    Deliberately free of lambdas and ``defaultdict`` factories so that a fitted
+    featuriser pickles cleanly into a served model artifact.
     """
-    states: dict[str, _TeamState] = defaultdict(_TeamState)
-    head_to_head: dict[tuple[str, str], deque] = defaultdict(lambda: deque(maxlen=_FORM_WINDOW))
 
-    rows: list[dict[str, float]] = []
+    def __init__(self) -> None:
+        self.states: dict[str, _TeamState] = {}
+        self.head_to_head: dict[tuple[str, str], deque] = {}
+        self.last_date: pd.Timestamp | None = None
 
-    for match in frame.itertuples(index=False):
-        home, away = match.HomeTeam, match.AwayTeam
-        home_state, away_state = states[home], states[away]
+    # -- internal accessors ------------------------------------------------
+    def _state(self, team: str) -> _TeamState:
+        state = self.states.get(team)
+        if state is None:
+            state = _TeamState()
+            self.states[team] = state
+        return state
 
-        # ---- features: strictly pre-match -------------------------------
+    def _h2h(self, home: str, away: str) -> deque:
+        window = self.head_to_head.get((home, away))
+        if window is None:
+            window = deque(maxlen=_FORM_WINDOW)
+            self.head_to_head[(home, away)] = window
+        return window
+
+    # -- public API --------------------------------------------------------
+    def teams(self) -> list[str]:
+        """Every team seen so far, for populating a fixture picker."""
+        return sorted(self.states)
+
+    def features_for(
+        self, home: str, away: str, date: pd.Timestamp | None = None
+    ) -> dict[str, float]:
+        """Pre-match features for a fixture. Pure — never mutates state."""
+        date = pd.Timestamp(date) if date is not None else (self.last_date or pd.Timestamp.now())
+        home_state, away_state = self._state(home), self._state(away)
+
         home_elo, away_elo = home_state.elo, away_state.elo
         expected_home = 1.0 / (
             1.0 + 10 ** ((away_elo - home_elo - _ELO_HOME_ADVANTAGE) / 400.0)
@@ -222,23 +249,26 @@ def build_match_features(frame: pd.DataFrame) -> pd.DataFrame:
             if state.last_played is None:
                 record[f"{side}_rest_days"] = np.nan
             else:
-                record[f"{side}_rest_days"] = float((match.Date - state.last_played).days)
+                record[f"{side}_rest_days"] = float((date - state.last_played).days)
 
-        h2h = head_to_head[(home, away)]
+        h2h = self._h2h(home, away)
         record["h2h_home_points"] = float(np.mean(h2h)) if h2h else np.nan
         record["h2h_matches"] = float(len(h2h))
 
         record["is_valid"] = (
             home_state.played >= _MIN_HISTORY and away_state.played >= _MIN_HISTORY
         )
-        rows.append(record)
+        return record
 
-        # ---- state update: this match is now history --------------------
+    def observe(self, match) -> None:
+        """Fold a completed match into the state, making it history."""
+        home, away = match.HomeTeam, match.AwayTeam
+        home_state, away_state = self._state(home), self._state(away)
+
         home_goals, away_goals = int(match.FTHG), int(match.FTAG)
-        new_home_elo, new_away_elo, _ = _elo_update(
-            home_elo, away_elo, home_goals, away_goals
+        home_state.elo, away_state.elo, _ = _elo_update(
+            home_state.elo, away_state.elo, home_goals, away_goals
         )
-        home_state.elo, away_state.elo = new_home_elo, new_away_elo
 
         if home_goals > away_goals:
             home_points, away_points = 3.0, 0.0
@@ -262,7 +292,25 @@ def build_match_features(frame: pd.DataFrame) -> pd.DataFrame:
         away_state.played += 1
         home_state.last_played = match.Date
         away_state.last_played = match.Date
-        head_to_head[(home, away)].append(home_points)
+        self._h2h(home, away).append(home_points)
+        self.last_date = match.Date
+
+
+def build_match_features(
+    frame: pd.DataFrame, featurizer: MatchFeaturizer | None = None
+) -> pd.DataFrame:
+    """Attach pre-match features to every row of a chronologically sorted frame.
+
+    Rows whose teams do not yet have ``_MIN_HISTORY`` completed matches are
+    dropped downstream rather than imputed, so no model trains on invented form.
+    Pass a ``featurizer`` to keep the resulting state for serving.
+    """
+    featurizer = featurizer if featurizer is not None else MatchFeaturizer()
+
+    rows: list[dict[str, float]] = []
+    for match in frame.itertuples(index=False):
+        rows.append(featurizer.features_for(match.HomeTeam, match.AwayTeam, match.Date))
+        featurizer.observe(match)
 
     features = pd.DataFrame(rows, index=frame.index)
     return pd.concat([frame, features], axis=1)
@@ -272,13 +320,19 @@ def _prepare(
     leagues: tuple[str, ...],
     seasons: tuple[str, ...],
     cache_dir: Path | None,
-) -> pd.DataFrame:
-    enriched = build_match_features(load_football(leagues, seasons, cache_dir))
+) -> tuple[pd.DataFrame, MatchFeaturizer]:
+    """Featurise the history and return it alongside the resulting state.
+
+    The featuriser is handed back so a served artifact can carry it and score
+    fixtures that have not been played, using the same code path as training.
+    """
+    featurizer = MatchFeaturizer()
+    enriched = build_match_features(load_football(leagues, seasons, cache_dir), featurizer)
     usable = enriched[enriched["is_valid"]].drop(columns=["is_valid"]).copy()
     if usable.empty:
         raise ValueError("No matches left after requiring team history; add more seasons.")
     usable["total_goals"] = usable["FTHG"].astype(int) + usable["FTAG"].astype(int)
-    return usable.reset_index(drop=True)
+    return usable.reset_index(drop=True), featurizer
 
 
 def _feature_names(frame: pd.DataFrame) -> list[str]:
@@ -344,7 +398,7 @@ def _build(
     cache_dir: Path | None,
     holdout_seasons: int,
 ) -> TabularTask:
-    frame = _prepare(leagues, seasons, cache_dir)
+    frame, featurizer = _prepare(leagues, seasons, cache_dir)
     features = _feature_names(frame)
     train, test = _temporal_split(frame, holdout_seasons)
 
@@ -353,6 +407,9 @@ def _build(
         "test_fixtures": test[["HomeTeam", "AwayTeam"]].reset_index(drop=True),
         "seasons_train": sorted(train["season"].unique()),
         "seasons_test": sorted(test["season"].unique()),
+        # Carried into the served artifact so the API can score unplayed fixtures.
+        "featurizer": featurizer,
+        "teams": featurizer.teams(),
     }
     result_odds = _odds_frame(test, ODDS_COLUMNS)
     if result_odds is not None:

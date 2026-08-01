@@ -1,0 +1,77 @@
+# Fits the models and writes pickled artifacts into the shared volume.
+#
+# Run this before the Deployment becomes ready for the first time, and again
+# whenever you want to refresh the models:
+#   kubectl -n tabfm-lab delete job tabfm-lab-train --ignore-not-found
+#   kubectl -n tabfm-lab apply -f k8s/job-train.yaml
+#
+# The Job needs egress to the public dataset hosts, and to huggingface.co as
+# well if --model tabfm is used.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tabfm-lab-train
+  namespace: tabfm-lab
+  labels:
+    app.kubernetes.io/name: tabfm-lab
+    app.kubernetes.io/component: trainer
+spec:
+  backoffLimit: 2
+  # Reap finished Jobs after a day so repeated runs do not accumulate.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tabfm-lab
+        app.kubernetes.io/component: trainer
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: trainer
+          image: ghcr.io/tumi-m/tabfm-lab-api:0.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - tabfm-lab-train
+            - --output
+            - /var/lib/tabfm/artifacts
+            - --data-dir
+            - /var/lib/tabfm/data
+            # "auto" prefers TabFM and falls back to gradient boosting when the
+            # weights cannot be fetched, so the Job still produces a full set.
+            - --model
+            - auto
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /var/lib/tabfm/artifacts
+            - name: datasets
+              mountPath: /var/lib/tabfm/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: tabfm-lab-artifacts
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: tabfm-lab-datasets
+        # readOnlyRootFilesystem is on, so scratch space must be explicit.
+        - name: tmp
+          emptyDir: {}
