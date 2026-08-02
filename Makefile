@@ -15,7 +15,8 @@ help:
 	@echo "train           Fit models and write pickled artifacts to $(ARTIFACTS)/"
 	@echo "serve           Run the API and UI on http://localhost:$(PORT)"
 	@echo "docker-build    Build the serving image ($(IMAGE))"
-	@echo "docker-up       Train into a volume, then serve, via docker compose"
+	@echo "docker-up       One command: build, train on first boot, serve"
+	@echo "docker-retrain  Refresh the models in the compose volume"
 	@echo "k8s-apply       Apply the Kubernetes manifests"
 	@echo "clean           Remove caches, reports, artifacts and build output"
 
@@ -49,9 +50,13 @@ serve:
 docker-build:
 	docker build -f docker/Dockerfile -t $(IMAGE) .
 
+# The entrypoint trains on first boot when the volume is empty, so this is the
+# only command needed.
 docker-up:
-	docker compose -f docker/docker-compose.yml run --rm trainer
-	docker compose -f docker/docker-compose.yml up api
+	docker compose -f docker/docker-compose.yml up
+
+docker-retrain:
+	docker compose -f docker/docker-compose.yml run --rm retrain
 
 k8s-apply:
 	kubectl apply -k k8s/

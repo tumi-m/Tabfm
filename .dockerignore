@@ -16,4 +16,10 @@ artifacts/
 .DS_Store
 *.md
 !README.md
+
+# Deployment and tooling config is not needed inside the image. `docker/` is
+# deliberately absent from this list — the build copies the entrypoint from it.
 k8s/
+.github/
+.devcontainer/
+

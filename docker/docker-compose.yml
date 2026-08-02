@@ -1,9 +1,13 @@
-# Local stack: train once into a shared volume, then serve.
+# One command:
 #
-#   docker compose -f docker/docker-compose.yml run --rm trainer
-#   docker compose -f docker/docker-compose.yml up api
+#   docker compose -f docker/docker-compose.yml up
 #
-# The UI is then at http://localhost:8000 and the API docs at /docs.
+# The first start trains the models into a named volume (a few minutes, mostly
+# downloading the public datasets); later starts reuse them and come up in
+# seconds. UI on http://localhost:8000, API docs at /docs.
+#
+# To retrain without a full rebuild:
+#   docker compose -f docker/docker-compose.yml run --rm retrain
 
 name: tabfm-lab
 
@@ -16,39 +20,48 @@ services:
         INSTALL_TABFM: "${INSTALL_TABFM:-false}"
     image: tabfm-lab-api:local
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
       TABFM_ARTIFACT_DIR: /var/lib/tabfm/artifacts
+      TABFM_DATA_DIR: /var/lib/tabfm/data
+      # Train on first boot when the volume is empty. Set to 0 if you would
+      # rather populate the volume yourself with the `retrain` service.
+      AUTO_TRAIN: "1"
+      TRAIN_MODEL: "${TRAIN_MODEL:-auto}"
       WEB_CONCURRENCY: "1"
     volumes:
-      - artifacts:/var/lib/tabfm/artifacts:ro
+      - artifacts:/var/lib/tabfm/artifacts
+      - datasets:/var/lib/tabfm/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      # Generous, because the first boot may be training rather than serving.
+      start_period: 300s
     restart: unless-stopped
 
-  # One-shot job. Downloads the public datasets, fits the models and writes the
-  # pickles into the volume the API mounts read-only.
-  trainer:
+  # Explicit retrain. Overrides the entrypoint's `serve` default with a real
+  # command, so it trains and exits instead of starting a server.
+  retrain:
+    image: tabfm-lab-api:local
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
         INSTALL_TABFM: "${INSTALL_TABFM:-false}"
-    image: tabfm-lab-api:local
-    environment:
-      TABFM_ARTIFACT_DIR: /var/lib/tabfm/artifacts
+    command:
+      - tabfm-lab-train
+      - --output
+      - /var/lib/tabfm/artifacts
+      - --data-dir
+      - /var/lib/tabfm/data
+      - --model
+      - "${TRAIN_MODEL:-auto}"
     volumes:
       - artifacts:/var/lib/tabfm/artifacts
       - datasets:/var/lib/tabfm/data
-    command: >
-      tabfm-lab-train
-      --output /var/lib/tabfm/artifacts
-      --data-dir /var/lib/tabfm/data
-      --model ${TRAIN_MODEL:-auto}
+    profiles: ["tools"]
     restart: "no"
 
 volumes:

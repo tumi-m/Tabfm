@@ -1,0 +1,41 @@
+{
+  "name": "TabFM Lab",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  // Installs the package and trains the models, so the container is ready to
+  // serve when you attach rather than needing a separate setup pass. Takes a
+  // few minutes on first create, mostly downloading the public datasets.
+  "postCreateCommand": "pip install --user -e '.[api,dev]' && tabfm-lab-train --output artifacts",
+
+  // Starts the API in the background on attach. Stop it with `pkill uvicorn`.
+  "postAttachCommand": {
+    "server": "nohup env TABFM_ARTIFACT_DIR=artifacts python -m uvicorn tabfm_lab.serving.app:app --host 0.0.0.0 --port 8000 > /tmp/tabfm-api.log 2>&1 &"
+  },
+
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "TabFM Lab UI",
+      "onAutoForward": "openPreview"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"]
+      }
+    }
+  },
+
+  "remoteUser": "vscode"
+}

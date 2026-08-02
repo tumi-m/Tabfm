@@ -11,6 +11,12 @@ data:
   TABFM_ARTIFACT_DIR: "/var/lib/tabfm/artifacts"
   TABFM_FRONTEND_DIR: "/app/frontend"
 
+  # The container trains on first boot when run standalone; in Kubernetes the
+  # training Job owns that and the Deployment mounts the result read-only, so a
+  # pod training on its own would be wasteful and would fail on the read-only
+  # mount. Readiness stays 503 until the Job has populated the volume.
+  AUTO_TRAIN: "0"
+
   # Each worker unpickles its own copy of every model, so memory scales with
   # this number. Prefer more replicas over more workers per pod.
   WEB_CONCURRENCY: "1"

@@ -16,6 +16,37 @@ served over a FastAPI service with a static web UI, containerised, and deployed 
 Kubernetes manifests. Jump to [Serving](#serving-the-models), [Docker](#docker) or
 [Kubernetes](#kubernetes) for that half.
 
+## Run it
+
+Three ways, in increasing order of how much you have to install.
+
+**Nothing installed — GitHub Codespaces.** Open the repo on GitHub → *Code* →
+*Codespaces* → *Create codespace*. The devcontainer installs the package, trains
+the models and starts the API; port 8000 forwards automatically and the UI opens
+in a preview tab.
+
+**Docker only.** Once CI has published the image (it builds on every push, see
+[CI](#ci)), nothing needs cloning:
+
+```bash
+docker run -p 8000:8000 ghcr.io/tumi-m/tabfm-lab-api:latest
+```
+
+The published image is built with the models already inside, so it serves
+immediately. From a clone, one command builds and runs the same thing:
+
+```bash
+docker compose -f docker/docker-compose.yml up
+```
+
+That trains on first start into a named volume — a few minutes, mostly
+downloading the datasets — and reuses it on later starts.
+
+**Locally, with Python.** See [Install](#install) and [Usage](#usage).
+
+Whichever route, the UI is at `http://localhost:8000` and the API docs at
+`/docs`.
+
 ## The four tasks
 
 | Task | Industry | Type | Target | Why it matters |
@@ -230,22 +261,48 @@ this repo come out at 180–420 KB each.
 ## Docker
 
 ```bash
-make docker-build
-make docker-up          # trains into a volume, then serves on :8000
+docker compose -f docker/docker-compose.yml up      # build, train, serve
 ```
 
-TabFM is **off by default** in the image. Serving only needs
-numpy/pandas/scikit-learn unless an artifact actually contains a TabFM model,
-and adding torch multiplies the image size by roughly ten. Turn it on when you
-need it:
+The entrypoint checks the artifact directory on boot. If it is empty it trains
+first; if models are already there — because the volume was populated by an
+earlier run, or because they were baked into the image — it serves straight
+away. So a bare `docker run` is always enough, and never trains twice.
+
+Explicit commands bypass that entirely, which is how the Kubernetes training Job
+and the `retrain` service work:
 
 ```bash
-docker build -f docker/Dockerfile --build-arg INSTALL_TABFM=true -t tabfm-lab-api .
+docker compose -f docker/docker-compose.yml run --rm retrain
 ```
 
-The image runs as a non-root user with a read-only root filesystem, carries a
-`HEALTHCHECK`, and takes artifacts at runtime rather than baking them in — so
-shipping a retrained model does not mean rebuilding the image.
+Two build arguments:
+
+| Argument | Default | Effect |
+|---|---|---|
+| `BAKE_ARTIFACTS` | `false` | Train during the build so the image starts instantly. CI sets this. |
+| `INSTALL_TABFM` | `false` | Add TabFM and torch. Off because serving needs neither unless an artifact contains a TabFM model, and torch multiplies image size by roughly ten. |
+
+```bash
+docker build -f docker/Dockerfile \
+  --build-arg INSTALL_TABFM=true --build-arg BAKE_ARTIFACTS=true \
+  -t tabfm-lab-api .
+```
+
+The image runs as a non-root user, carries a `HEALTHCHECK`, and can take
+artifacts at runtime from a volume — so shipping a retrained model does not
+require rebuilding.
+
+## CI
+
+`.github/workflows/ci.yml` lints and runs the test suite on every push, then
+builds the image with the models baked in, pushes it to GHCR, and smoke-tests
+the published image by starting it and hitting `/api/ready`, the UI and a real
+prediction endpoint.
+
+That is also the answer to "does the container actually work?" — the image build
+is verified there, on a runner with a Docker daemon and unrestricted network,
+rather than being asserted here.
 
 ## Kubernetes
 
