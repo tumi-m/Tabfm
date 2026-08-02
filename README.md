@@ -18,34 +18,62 @@ Kubernetes manifests. Jump to [Serving](#serving-the-models), [Docker](#docker) 
 
 ## Run it
 
-Three ways, in increasing order of how much you have to install.
+### The short version — Streamlit
 
-**Nothing installed — GitHub Codespaces.** Open the repo on GitHub → *Code* →
-*Codespaces* → *Create codespace*. The devcontainer installs the package, trains
-the models and starts the API; port 8000 forwards automatically and the UI opens
-in a preview tab.
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
 
-**Docker only.** Once CI has published the image (it builds on every push, see
-[CI](#ci)), nothing needs cloning:
+That is the whole thing. It opens a browser at `http://localhost:8501`, trains
+the models on first run if `artifacts/` is empty, and gives you both industries
+in one page. No API to start, no build step, no separate training command.
+
+`streamlit_app.py` is a single file that imports the same package the rest of
+the project uses — the same pickled artifacts, the same `MatchFeaturizer`, the
+same betting maths — so it and the FastAPI service cannot disagree about a
+prediction.
+
+**For a public link**, point [Streamlit Community
+Cloud](https://share.streamlit.io) at this repo and set the entry point to
+`streamlit_app.py`. It is free and gives you a `*.streamlit.app` URL. The first
+load trains the models, which takes a few minutes; if that is too slow for the
+platform's boot budget, run `tabfm-lab-train` locally and commit `artifacts/`
+(they are gitignored by default — see the security note under
+[About the pickles](#about-the-pickles) before you do).
+
+### The other ways
+
+**Nothing installed at all — GitHub Codespaces.** *Code* → *Codespaces* →
+*Create codespace*. The devcontainer installs, trains and starts the API; port
+8000 forwards automatically.
+
+**Docker.** The image CI publishes has the models baked in, so it serves
+immediately:
 
 ```bash
 docker run -p 8000:8000 ghcr.io/tumi-m/tabfm-lab-api:latest
 ```
 
-The published image is built with the models already inside, so it serves
-immediately. From a clone, one command builds and runs the same thing:
+From a clone, one command builds and runs the same thing, training on first
+start into a named volume:
 
 ```bash
 docker compose -f docker/docker-compose.yml up
 ```
 
-That trains on first start into a named volume — a few minutes, mostly
-downloading the datasets — and reuses it on later starts.
+**Locally with the API** rather than Streamlit — see [Install](#install) and
+[Serving](#serving-the-models). That route gives you the REST endpoints, the
+static web UI and OpenAPI docs at `/docs`, which the Streamlit app does not.
 
-**Locally, with Python.** See [Install](#install) and [Usage](#usage).
+### Which one?
 
-Whichever route, the UI is at `http://localhost:8000` and the API docs at
-`/docs`.
+| You want | Use |
+|---|---|
+| To click around and see predictions | Streamlit (`streamlit run streamlit_app.py`) |
+| A shareable public link, free | Streamlit Community Cloud |
+| To call it from other software | The FastAPI service (`make serve`) |
+| To deploy it properly | Docker image → Kubernetes (`k8s/`) |
 
 ## The four tasks
 
@@ -405,10 +433,16 @@ src/tabfm_lab/
 ├── reporting.py       # Markdown rendering
 └── cli.py             # tabfm-lab entry point
 
+streamlit_app.py       # single-file Streamlit UI — the simplest way to run it
 frontend/              # static UI (no build step) served by the API
 docker/                # Dockerfile + compose stack
 k8s/                   # namespace, PVCs, training Job, Deployment, HPA, Ingress
 ```
+
+There are two front ends because they answer different needs: Streamlit for
+looking at predictions with nothing installed, the API plus static UI for being
+called by other software and deployed behind Kubernetes. Both read the same
+artifacts through the same code.
 
 ## Licensing
 

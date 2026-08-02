@@ -10,3 +10,8 @@ pandas>=2.1
 scikit-learn>=1.4
 scipy>=1.11
 requests>=2.31
+
+# The Streamlit app (streamlit_app.py). Listed here because Streamlit Community
+# Cloud installs this file when deploying the repo. The floor is 1.50 because
+# the app uses the `width=` argument that replaced `use_container_width`.
+streamlit>=1.50

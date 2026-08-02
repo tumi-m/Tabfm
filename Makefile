@@ -12,6 +12,7 @@ help:
 	@echo "lint            Run ruff"
 	@echo "run             Full benchmark: TabFM plus baselines"
 	@echo "run-baselines   Benchmark without TabFM"
+	@echo "app             Run the Streamlit app (simplest; opens a browser)"
 	@echo "train           Fit models and write pickled artifacts to $(ARTIFACTS)/"
 	@echo "serve           Run the API and UI on http://localhost:$(PORT)"
 	@echo "docker-build    Build the serving image ($(IMAGE))"
@@ -32,7 +33,11 @@ test:
 	python -m pytest
 
 lint:
-	python -m ruff check src tests
+	python -m ruff check src tests streamlit_app.py
+
+# Trains on first run if artifacts/ is empty, then opens in a browser.
+app:
+	python -m streamlit run streamlit_app.py
 
 run:
 	python -m tabfm_lab.cli
