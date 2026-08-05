@@ -102,13 +102,20 @@ def _environment_versions() -> dict[str, str]:
 
     A pickle is only loadable against compatible libraries, so the mismatch that
     breaks it later is worth capturing at write time.
+
+    Every value is coerced with ``str()``, which is load-bearing rather than
+    cosmetic: ``torch.__version__`` is a ``torch.torch_version.TorchVersion``
+    instance, not a plain string, so storing it as-is pickles a reference to a
+    torch class. That made every artifact — including ones holding nothing but a
+    scikit-learn model — refuse to unpickle anywhere torch was not installed.
     """
     versions = {"python": platform.python_version()}
     for module in ("numpy", "pandas", "sklearn", "tabfm", "torch"):
         try:
-            versions[module] = __import__(module).__version__
+            version = __import__(module).__version__
         except Exception:  # noqa: BLE001 - absence is informative, not fatal
             continue
+        versions[module] = str(version)
     return versions
 
 

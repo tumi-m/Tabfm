@@ -34,13 +34,34 @@ the project uses — the same pickled artifacts, the same `MatchFeaturizer`, the
 same betting maths — so it and the FastAPI service cannot disagree about a
 prediction.
 
-**For a public link**, point [Streamlit Community
-Cloud](https://share.streamlit.io) at this repo and set the entry point to
-`streamlit_app.py`. It is free and gives you a `*.streamlit.app` URL. The first
-load trains the models, which takes a few minutes; if that is too slow for the
-platform's boot budget, run `tabfm-lab-train` locally and commit `artifacts/`
-(they are gitignored by default — see the security note under
-[About the pickles](#about-the-pickles) before you do).
+### For a public link — Streamlit Community Cloud
+
+Free, and it deploys straight from this repository.
+
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+2. **Create app** → **Deploy a public app from GitHub**.
+3. Fill in:
+   - **Repository:** `tumi-m/Tabfm`
+   - **Branch:** the branch you want to serve
+   - **Main file path:** `streamlit_app.py`
+4. Open **Advanced settings** and set **Python version** to **3.11** or newer —
+   the package requires it, and the default may be older. This is the one field
+   that is easy to miss and cannot be changed later without deleting and
+   redeploying the app.
+5. **Deploy**.
+
+The four trained models are committed under `artifacts/`, so the app loads them
+and serves immediately rather than training on boot. That matters more than it
+sounds: Community Cloud puts an app to sleep after 12 hours without traffic, and
+without the artifacts every wake-up would retrain from scratch.
+
+Regenerating them is `make train`, then commit the changed `.pkl` files. Read
+the security note under [About the pickles](#about-the-pickles) first — a pickle
+arriving in a pull request is a code change in disguise, so review those files
+as you would review code.
+
+Community Cloud gives roughly 1 GB of memory, which is ample here: the four
+models total 1.2 MB and load in under a second.
 
 ### The other ways
 

@@ -80,6 +80,39 @@ def test_saved_artifact_records_field_defaults(tmp_path) -> None:
     assert specs["score"].default == pytest.approx(task.X_train["score"].median())
 
 
+def test_recorded_versions_are_plain_strings() -> None:
+    """Metadata must not smuggle a library's own version type into the pickle.
+
+    `torch.__version__` is a TorchVersion instance, not a str. Storing it
+    directly pickled a reference to a torch class, so every artifact — even one
+    holding only a scikit-learn model — failed to unpickle without torch
+    installed. A str subclass must be flattened, not merely stringy.
+    """
+    from tabfm_lab.serving import artifacts as artifacts_module
+
+    versions = artifacts_module._environment_versions()
+    assert versions, "expected at least the Python version"
+    for name, value in versions.items():
+        assert type(value) is str, f"{name} version is {type(value)}, not a plain str"
+
+
+def test_artifact_pickle_does_not_reference_optional_dependencies(tmp_path) -> None:
+    """A baseline artifact must carry no class from an optional dependency.
+
+    The plain strings "torch" and "tabfm" may legitimately appear — they are
+    dict keys in the recorded versions. What must not appear is a *class path*,
+    because that is what forces an import at load time. Neither the serving
+    image nor the hosted app installs these, so a stray reference makes the
+    artifact unloadable there.
+    """
+    artifact = _fitted_artifact(_classification_task())
+    path = artifact.save(tmp_path / "portable.pkl")
+    payload = path.read_bytes()
+
+    for reference in (b"torch.torch_version", b"TorchVersion", b"tabfm.src"):
+        assert reference not in payload, f"artifact pickle references {reference!r}"
+
+
 def test_missing_fields_fall_back_to_defaults(tmp_path) -> None:
     artifact = _fitted_artifact(_classification_task())
     frame = artifact.frame_from_records([{}])
