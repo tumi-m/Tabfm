@@ -1,0 +1,25 @@
+# Streamlit configuration.
+#
+# The theme colours are the same validated palette the app's probability bars
+# use, so the chrome and the charts agree.
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"          # categorical slot 1, also the accent
+backgroundColor = "#fcfcfb"       # light chart surface
+secondaryBackgroundColor = "#f0efec"
+textColor = "#0b0b0b"
+font = "sans serif"
+
+[server]
+# Community Cloud caps uploads anyway; the app never accepts file uploads.
+maxUploadSize = 5
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Show errors in the app rather than only in the server log — on a hosted
+# deployment the log is the harder of the two to reach.
+showErrorDetails = true

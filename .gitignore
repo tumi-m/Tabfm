@@ -19,9 +19,17 @@ data/interim/
 reports/*
 !reports/.gitkeep
 
-# Pickled model artifacts are build outputs, produced by `tabfm-lab-train`.
-# They are also executable on load, so they do not belong in source control.
-artifacts/
+# Pickled model artifacts are normally build outputs and are not committed —
+# they are executable on load, so a pickle arriving via a pull request is a code
+# change in disguise. The four small artifacts under artifacts/ are the
+# exception, committed deliberately so the Streamlit Community Cloud deployment
+# starts instantly: hosted apps sleep after 12 hours idle, and without them every
+# wake-up would retrain for minutes.
+#
+# Review changes to these files as you would review code. To go back to building
+# them locally instead: `git rm --cached artifacts/*.pkl` and drop the negation.
+artifacts/*
+!artifacts/*.pkl
 
 # Model caches
 .cache/
