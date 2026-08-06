@@ -262,3 +262,95 @@ class TabFMModel:
 def build_tabfm(task: TabularTask, **kwargs) -> TabFMModel:
     """Construct a TabFM model matching ``task``'s objective."""
     return TabFMModel(task.task_type, **kwargs)
+
+
+# --------------------------------------------------------------------------
+# Introspection, for the UI's "how TabFM is used" view
+# --------------------------------------------------------------------------
+#: Hugging Face repository the pretrained weights come from.
+WEIGHTS_REPO = "google/tabfm-1.0.0-pytorch"
+
+
+def availability(
+    backend: str = "pytorch",
+    *,
+    probe_weights: bool = False,
+    checkpoint_path: str | None = None,
+    device: str | None = None,
+) -> dict[str, Any]:
+    """Report whether TabFM can actually run here, and why not if it cannot.
+
+    ``probe_weights`` is off by default because loading them downloads hundreds
+    of megabytes on first use — far too costly for a page that merely wants to
+    display status. Pass it only in response to an explicit user action.
+    """
+    info: dict[str, Any] = {
+        "package_installed": False,
+        "package_version": None,
+        "backend": backend,
+        "backend_available": False,
+        "weights_probed": probe_weights,
+        "weights_loadable": False,
+        "weights_repo": WEIGHTS_REPO,
+        "detail": "",
+    }
+
+    try:
+        import tabfm
+    except ImportError as exc:
+        info["detail"] = f"{exc}. Install with: pip install \"tabfm[{backend}]\""
+        return info
+
+    info["package_installed"] = True
+    try:
+        from importlib.metadata import version
+
+        info["package_version"] = version("tabfm")
+    except Exception:  # noqa: BLE001 - a missing version is cosmetic
+        info["package_version"] = "unknown"
+
+    module_name = f"tabfm_v1_0_0_{backend}"
+    if not hasattr(tabfm, module_name):
+        info["detail"] = (
+            f"The {backend} backend is not installed "
+            f'(tabfm has no {module_name!r}). Try: pip install "tabfm[{backend}]"'
+        )
+        return info
+    info["backend_available"] = True
+
+    if not probe_weights:
+        info["detail"] = "Package and backend present; weights not checked."
+        return info
+
+    try:
+        _load_backend(backend, "classification", checkpoint_path=checkpoint_path, device=device)
+    except TabFMUnavailableError as exc:
+        info["detail"] = str(exc)
+        return info
+
+    info["weights_loadable"] = True
+    info["detail"] = "TabFM is ready: package, backend and pretrained weights all load."
+    return info
+
+
+def constructor_parameters(task_type: str = "classification") -> dict[str, Any]:
+    """Defaults of the installed TabFM estimator, read from its live signature.
+
+    Reading them rather than documenting them means this cannot drift from the
+    version actually installed.
+    """
+    from tabfm import TabFMClassifier, TabFMRegressor
+
+    estimator = TabFMRegressor if task_type == "regression" else TabFMClassifier
+    return {
+        name: parameter.default
+        for name, parameter in inspect.signature(estimator).parameters.items()
+        if parameter.default is not inspect.Parameter.empty
+    }
+
+
+def wrapper_source() -> str:
+    """This module's own source, so the UI can show the real integration."""
+    from pathlib import Path
+
+    return Path(__file__).read_text(encoding="utf-8")

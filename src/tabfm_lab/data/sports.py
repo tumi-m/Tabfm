@@ -46,6 +46,17 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_SEASONS = ("1516", "1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324")
 DEFAULT_LEAGUES = ("premier-league",)
 
+#: Europe's five biggest domestic leagues. Team names do not collide across
+#: them, so a single Elo table keyed by team name stays unambiguous; and because
+#: no club moves between these countries, each league forms its own rating pool
+#: that stays centred on the 1500 start.
+MULTI_LEAGUES = (
+    "premier-league", "la-liga", "serie-a", "bundesliga", "ligue-1",
+)
+
+#: One more season than the single-league default, since the mirror carries it.
+EXTENDED_SEASONS = DEFAULT_SEASONS + ("2425",)
+
 #: Per-match statistics we roll forward as form. Kept to columns that both the
 #: canonical source and the mirror provide.
 _FORM_STATS = {
@@ -491,6 +502,39 @@ def total_goals_task(
     )
 
 
+def multi_league_result_task(
+    leagues: tuple[str, ...] = MULTI_LEAGUES,
+    seasons: tuple[str, ...] = EXTENDED_SEASONS,
+    cache_dir: Path | None = None,
+    *,
+    holdout_seasons: int = 2,
+) -> TabularTask:
+    """The 1X2 task again, across five leagues instead of one.
+
+    Worth having as a separate task rather than a bigger version of the first:
+    it asks whether the same Elo-and-form representation transfers across
+    competitions with different scoring rates and home advantages, or whether
+    the single-league model was quietly fitting one league's quirks. ``league``
+    is a feature, so a model may condition on it.
+    """
+    return _build(
+        name="sports-multi-league",
+        task_type="classification",
+        target="FTR",
+        description=(
+            "Football 1X2 across the Premier League, La Liga, Serie A, "
+            "Bundesliga and Ligue 1, from pre-match features only. Roughly five "
+            "times the data of the single-league task, and a test of whether the "
+            "representation transfers between competitions."
+        ),
+        leagues=leagues,
+        seasons=seasons,
+        cache_dir=cache_dir,
+        holdout_seasons=holdout_seasons,
+    )
+
+
 def build_tasks(cache_dir: Path | None = None, **kwargs) -> list[TabularTask]:
     return [match_result_task(cache_dir=cache_dir, **kwargs),
-            total_goals_task(cache_dir=cache_dir, **kwargs)]
+            total_goals_task(cache_dir=cache_dir, **kwargs),
+            multi_league_result_task(cache_dir=cache_dir, **kwargs)]

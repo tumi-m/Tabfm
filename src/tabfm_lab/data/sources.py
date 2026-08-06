@@ -122,6 +122,22 @@ ONLINE_SHOPPERS = RemoteFile(
 # regenerated daily from the same upstream but ships the match-statistics subset
 # without odds, so we always try upstream first.
 
+# --------------------------------------------------------------------------
+# E-commerce: customer personality and campaign response
+# --------------------------------------------------------------------------
+# 2,240 customers of a retailer, with two years of category spend, purchase
+# channels, five prior campaign outcomes and demographics. Widely circulated as
+# the "Customer Personality Analysis" / iFood marketing dataset.
+CUSTOMER_MARKETING = RemoteFile(
+    name="customer_marketing.csv",
+    urls=(
+        "https://raw.githubusercontent.com/nailson/ifood-data-business-analyst-test/master/ml_project1_data.csv",
+    ),
+    description="Retail customers with spend, channel and campaign-response history.",
+    required_columns=("Response", "Income", "MntWines", "Dt_Customer"),
+)
+
+
 #: League code -> (football-data.co.uk code, datahub mirror slug)
 FOOTBALL_LEAGUES: dict[str, tuple[str, str]] = {
     "premier-league": ("E0", "premier-league"),

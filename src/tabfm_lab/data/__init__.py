@@ -33,6 +33,9 @@ def _builder(module: str, function: str):
 TASK_BUILDERS = {
     "ecommerce-conversion": _builder("ecommerce", "conversion_task"),
     "ecommerce-page-value": _builder("ecommerce", "page_value_task"),
+    "ecommerce-campaign-response": _builder("ecommerce", "campaign_response_task"),
+    "ecommerce-customer-value": _builder("ecommerce", "customer_value_task"),
     "sports-match-result": _builder("sports", "match_result_task"),
     "sports-total-goals": _builder("sports", "total_goals_task"),
+    "sports-multi-league": _builder("sports", "multi_league_result_task"),
 }

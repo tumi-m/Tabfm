@@ -96,14 +96,17 @@ static web UI and OpenAPI docs at `/docs`, which the Streamlit app does not.
 | To call it from other software | The FastAPI service (`make serve`) |
 | To deploy it properly | Docker image → Kubernetes (`k8s/`) |
 
-## The four tasks
+## The seven tasks
 
 | Task | Industry | Type | Target | Why it matters |
 |---|---|---|---|---|
 | `ecommerce-conversion` | E-commerce | Classification | Session ends in a purchase | The funnel question. ~15% positive, so calibration matters more than accuracy. |
 | `ecommerce-page-value` | E-commerce | Regression | Google Analytics Page Value | Per-session revenue proxy. Heavily zero-inflated. |
+| `ecommerce-campaign-response` | E-commerce | Classification | Accepts the next campaign | Direct-marketing response. ~15% positive. |
+| `ecommerce-customer-value` | E-commerce | Regression | Two-year customer spend | Customer value from profile and engagement alone. |
 | `sports-match-result` | Sports betting | Classification | Home / draw / away | The 1X2 market, scored against real bookmaker prices. |
 | `sports-total-goals` | Sports betting | Regression | Total goals in the match | What the over/under 2.5 market prices. |
+| `sports-multi-league` | Sports betting | Classification | Home / draw / away | The same 1X2 question across five leagues — does the representation transfer? |
 
 ## Data
 
@@ -114,8 +117,20 @@ All data is public and downloaded on first run, then cached under `data/raw/`.
 user, with behavioural counters, Analytics page metrics and traffic attributes
 (Sakar et al., 2018). Licensed CC BY 4.0.
 
+**E-commerce — [Customer Personality / marketing](https://github.com/nailson/ifood-data-business-analyst-test)**
+2,240 retail customers with two years of category spend, purchase channels by
+channel, five prior campaign outcomes and demographics. Two quirks are handled
+rather than ignored: `Marital_Status` contains junk levels (`Absurd`, `YOLO`)
+that are folded into `Other` rather than dropped, since the rows are otherwise
+fine; and a handful of birth years are implausible (1893), so ages outside
+18–100 become missing and are imputed.
+
 **Sports betting — [football-data.co.uk](https://www.football-data.co.uk/)**
-Match results for the English Premier League, 2015/16 to 2023/24, free for personal use.
+Match results for five leagues — Premier League, La Liga, Serie A, Bundesliga,
+Ligue 1 — from 2015/16, free for personal use. The single-league tasks use the
+Premier League; `sports-multi-league` uses all five, about 17,500 matches.
+Team names do not collide across these five competitions, and no club moves
+between them, so one Elo table keyed by team name stays unambiguous.
 The loader tries football-data.co.uk first because it ships **Bet365 closing odds**,
 and falls back to the daily
 [datahub mirror](https://github.com/datasets/football-datasets) when upstream is
@@ -391,10 +406,13 @@ AUC and R².
 |---|---|---|
 | `ecommerce-conversion` | HistGradientBoosting | log loss **0.235**, ROC AUC **0.927**, PR AUC 0.730, accuracy 0.898 |
 | `ecommerce-page-value` | HistGradientBoosting | RMSE **1.137** (log1p space), R² 0.168 |
-| `sports-match-result` | Logistic Regression | log loss **0.976**, accuracy 0.549, ROC AUC (ovr) 0.657 |
+| `ecommerce-campaign-response` | Logistic Regression | log loss **0.263**, ROC AUC **0.895**, PR AUC 0.656, accuracy 0.886 |
+| `ecommerce-customer-value` | HistGradientBoosting | RMSE **272.8**, MAE 177.5, R² **0.803** |
+| `sports-match-result` | Logistic Regression | log loss **0.976**, accuracy 0.549 |
+| `sports-multi-league` | Logistic Regression | log loss **0.980**, accuracy 0.532, calibration error **0.021** |
 | `sports-total-goals` | HistGradientBoosting | RMSE **1.744**, R² −0.006 |
 
-Three things in that table are worth reading carefully, because they are the results a
+Five things in that table are worth reading carefully, because they are the results a
 leakage-free setup produces and an unsound one hides.
 
 - **Football accuracy of 55% is the honest ceiling**, not a weak model. Bookmakers with
@@ -403,10 +421,21 @@ leakage-free setup produces and an unsound one hides.
 - **Total goals is close to unpredictable**: R² hovers around zero, and the boosted tree
   barely beats predicting the mean. That is the correct finding. Match totals are
   dominated by variance that pre-match features cannot reach.
-- **Linear beats boosting on the 1X2 task.** With ~2,500 training rows and a
-  low signal-to-noise ratio, the flexible model overfits. This is exactly the regime
-  TabFM's zero-shot claim targets, which makes it the most interesting of the four
-  tasks to re-run once weights are available.
+- **Linear beats boosting on both small, noisy classification tasks** — the 1X2 markets
+  and campaign response. With one to three thousand training rows and low
+  signal-to-noise, the flexible model overfits. This is exactly the regime TabFM's
+  zero-shot claim targets, which makes these the most interesting tasks to re-run once
+  weights are available.
+- **More data buys calibration, not accuracy.** Going from one league to five barely
+  moves accuracy (0.549 → 0.532) or log loss (0.976 → 0.980), but calibration error
+  halves for the linear model (0.044 → 0.021) and drops sevenfold for boosting
+  (0.044 → 0.006). For a betting model that is the trade that matters: a well-calibrated
+  55% is worth more than an overconfident 57%.
+- **Customer value is where boosting earns its keep**: R² 0.803 against ridge regression's
+  0.043. Almost all of that gap is nonlinearity and interaction between income, children
+  at home and web-visit frequency — and it holds up only because the per-category
+  amounts and per-channel purchase counts are excluded from the features. Leave them in
+  and R² approaches 1.0 while the model learns nothing.
 
 The e-commerce conversion numbers line up with the published literature on this dataset
 (~0.89–0.90 accuracy), which is a useful sanity check that the pipeline is sound.
